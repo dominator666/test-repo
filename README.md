@@ -14,16 +14,19 @@
 
 ---
 
-## 📁 Структура данных
+## 📁 Структура репозитория
 
-| Файл | Описание |
-|---|---|
-| `course_project_train.csv` | Обучающая выборка, 7500 строк, 17 признаков |
-| `course_project_test.csv` | Тестовая выборка, 2500 строк, 16 признаков |
-| `predictions_final.csv` | Финальные прогнозы на тестовой выборке |
-| `HW_regression_Ilia_Zabegaev_final.ipynb` | Ноутбук с полным решением |
+```
+├── HW_regression_Ilia_Zabegaev_final.ipynb  		  # Ноутбук с решением
+├── course_project_train.csv                              # Обучающая выборка
+├── course_project_test.csv                               # Тестовая выборка
+├── predictions_final.csv                                 # Финальные прогнозы
+└── README.md
+```
 
-### Признаки датасета
+---
+
+## 📊 Описание данных
 
 | Признак | Описание |
 |---|---|
@@ -45,83 +48,83 @@
 | `Credit Score` | Кредитный рейтинг |
 | `Credit Default` | **Целевая переменная** (1 — дефолт, 0 — нет) |
 
+**Размер данных:** train — 7500 строк, test — 2500 строк  
+**Баланс классов:** 0 (71.8%) / 1 (28.2%) — умеренный дисбаланс
+
 ---
 
-## 🔬 Пайплайн разработки модели
+## 🔬 ML-пайплайн
 
 ### Шаг 1 — EDA (Разведочный анализ данных)
 
-**Ключевые находки:**
-
-- Дисбаланс классов: 71.8% — нет дефолта, 28.2% — дефолт (~1:2.5)
-- Пропуски в критичных признаках: `Months since last delinquent` — 54.4%, `Annual Income` и `Credit Score` — по 20.8%
-- `Annual Income` и `Credit Score` пропущены у одних и тех же 1557 строк
-- **Аномалии:**
-  - `Current Loan Amount` = 99,999,999 — явная заглушка (870 строк, 11.6%)
-  - `Credit Score` max = 7510 — часть значений ошибочно умножена на 10
-  - `Home Ownership`: категория `Have Mortgage` дублирует `Home Mortgage` (12 строк)
+Ключевые находки:
+- Пропуски: `Months since last delinquent` — 54%, `Annual Income` и `Credit Score` — по 20.8%
+- `Current Loan Amount` = 99,999,999 — заглушка в 870 строках (11.6%)
+- `Credit Score` max = 7510 — часть значений ошибочно умножена на 10
+- `Have Mortgage` дублирует `Home Mortgage` (12 строк)
+- Топ-2 признака по корреляции с дефолтом: `Term` (+0.181), `Credit Score` (-0.170)
 
 ### Шаг 2 — Preprocessing (Предобработка данных)
 
 | Проблема | Решение |
 |---|---|
 | `Credit Score` > 850 | Делим на 10 → диапазон 585–751 |
-| `Current Loan Amount` = 99999999 | Заменяем на NaN → медиана (265,826) |
-| `Annual Income`, `Credit Score` — 20% пропусков | Заполнение медианой по train |
-| `Bankruptcies`, `Years in current job` | Заполнение медианой |
-| `Months since last delinquent` — 54% пропусков | Два признака: `Has_Delinquent` (флаг) + `Months` = 0 |
+| `Current Loan Amount` = 99999999 | Заменяем на NaN → медиана по train |
+| `Annual Income`, `Credit Score` — 20% пропусков | Медиана по train |
+| `Bankruptcies`, `Years in current job` | Медиана по train |
+| `Months since last delinquent` — 54% пропусков | **Два признака:** `Has_Delinquent` (флаг) + `Months` = 0 |
 | `Have Mortgage` | Объединяем с `Home Mortgage` |
-| `Years in current job` — строки | Парсинг в числа (0–10) |
+| `Years in current job` — строки ("10+ years") | Парсинг в числа (0–10) |
 | `Term` | Бинаризация: Long Term = 1 |
 | `Home Ownership`, `Purpose` | Label Encoding (fit только на train) |
 | Все числовые признаки | StandardScaler (fit только на train) |
 
-> **Важное решение по `Months since last delinquent`:** пропуск означает отсутствие просрочек, а не неизвестное значение. Поэтому создан отдельный бинарный признак `Has_Delinquent`, а пропуски заполнены 0, а не медианой или -1.
+> **Ключевое решение:** 54% пропусков в `Months since last delinquent` — это не отсутствие данных, а отсутствие просрочек. Создан отдельный бинарный признак `Has_Delinquent`, пропуски заполнены 0.
 
-### Шаг 3 — Feature Engineering и отбор признаков
+### Шаг 3 — Feature Engineering
 
-**Топ признаков по корреляции с целевой переменной:**
-
-| Признак | Корреляция | Интерпретация |
-|---|---|---|
-| `Term` | +0.181 | Долгосрочные кредиты → чаще дефолт |
-| `Credit Score` | -0.170 | Ниже рейтинг → выше риск |
-| `Annual Income` | -0.095 | Ниже доход → выше риск |
-| `Current Loan Amount` | +0.082 | Больше сумма → выше риск |
-| `Home Ownership` | +0.065 | Тип жилья влияет на риск |
-
-**Отбор признаков (ANOVA F-test):** статистически значимых признаков — 7 (p-value < 0.05). При моделировании использовались все 17 признаков.
-
-**Созданные FE-признаки:**
+Создано 5 новых признаков на основе финансовой логики:
 
 | Признак | Формула | Смысл |
 |---|---|---|
 | `Debt to Income` | Monthly Debt / (Annual Income / 12) | Долговая нагрузка |
-| `Credit Utilization` | Current Credit Balance / Maximum Open Credit | Использование лимита |
-| `Loan to Income` | Current Loan Amount / Annual Income | Кредит к доходу |
+| `Credit Utilization` | Current Credit Balance / Maximum Open Credit | Использование кредитного лимита |
+| `Loan to Income` | Current Loan Amount / Annual Income | Кредит относительно дохода |
 | `Has Delinquent` | notna(Months since last delinquent) | Был ли факт просрочки |
 | `Has Credit Problems` | Number of Credit Problems > 0 | Есть ли кредитные проблемы |
 
+Итого признаков после FE: **22** (17 исходных + 5 новых)
+
 ### Шаг 4 — Моделирование
 
-**Балансировка классов:** `class_weight='balanced'` во всех моделях  
-**Валидация:** Stratified K-Fold (5 фолдов) + hold-out выборка 20%
+**Стратегия:**
+- Балансировка классов: `class_weight='balanced'` во всех моделях
+- Валидация: Stratified K-Fold (5 фолдов) + hold-out 20%
+- Подбор гиперпараметров: GridSearchCV
+- Подбор порога классификации через `predict_proba()` для максимизации F1
 
 ---
 
-## 📊 Результаты всех экспериментов
+## 📈 Результаты всех экспериментов
 
-| № | Модель | F1-score |
-|---|---|---|
-| 1 | Baseline LogReg — 7 признаков (sklearn) | 0.4699 |
-| 2 | **Tuned LogReg — все признаки (sklearn)** | **0.4875 ◄ ЛУЧШАЯ** |
-| 3 | Custom LogReg — самописная | 0.4828 |
-| 4 | LogReg + Feature Engineering | 0.4786 |
-| 5 | Polynomial LogReg degree=2 | 0.4838 |
-| 6 | Random Forest | 0.4864 |
+| № | Модель | Признаки | Гиперпараметры | F1-score |
+|---|---|---|---|---|
+| 1 | Baseline LogReg (sklearn) | 7 (F-test) | default | 0.4699 |
+| **2** | **Tuned LogReg (sklearn)** | **17 (все)** | **C=100, liblinear** | **0.4903 ◄** |
+| 3 | Custom LogReg (самописная) | 17 (все) | lr=0.1, n_iter=2000, порог=0.20 | 0.4828 |
+| 4 | LogReg + Feature Engineering | 22 | C=1, lbfgs | 0.4786 |
+| 5 | Polynomial LogReg degree=2 | 17 | C=1, liblinear | 0.4838 |
+| 6 | Random Forest | 10 (FE subset) | n_est=300, depth=8 | 0.4804 |
 
-**Лучшие гиперпараметры:** `C=10, solver='liblinear', class_weight='balanced'`  
-**Финальный прогноз:** Tuned LogReg на 17 признаках
+**Лучшая модель:** Tuned LogReg — все признаки (sklearn)  
+**Лучший F1:** 0.4903  
+**Оптимальный порог:** 0.50
+
+**Финальный прогноз на тесте:**
+```
+0 (нет дефолта): 1464 (58.6%)
+1 (дефолт):      1036 (41.4%)
+```
 
 ---
 
@@ -136,35 +139,40 @@ class LogisticRegressionCustom:
     def _sigmoid(self, z):
         return 1 / (1 + np.exp(-np.clip(z, -500, 500)))
     def fit(self, X, y):
-        # Градиентный спуск + Binary Cross-Entropy Loss
+        # Binary Cross-Entropy Loss + градиентный спуск
+        ...
+    def predict_proba(self, X):
         ...
     def predict(self, X, threshold=0.5):
         ...
 ```
 
-**Сравнение Custom vs sklearn:**
+**Сравнение Custom vs sklearn на всех 17 признаках:**
 
 | | sklearn LogReg | Custom LogReg |
 |---|---|---|
-| F1-score | **0.4875** | 0.4828 |
+| F1-score | **0.4903** | 0.4828 |
+| Оптимальный порог | 0.50 | 0.20 |
+| Параметры | C=100, liblinear | lr=0.1, n_iter=2000 |
 | Реализация | Из коробки | Градиентный спуск вручную |
-| Порог классификации | 0.5 | 0.22 (подобран) |
 
-Разница в F1 между реализациями составила **0.0047** — модели дают практически идентичное качество.
+Разница в F1: **0.0075** — результаты практически идентичны, что подтверждает корректность самописного алгоритма.
 
 ---
 
 ## 💡 Ключевые выводы
 
-1. **Логистическая регрессия достигла потолка ~0.487.** Данные имеют нелинейную структуру зависимостей, которую линейная модель не улавливает. Все варианты (Feature Engineering, Polynomial Features, разные наборы признаков) дали схожий результат.
+1. **Логистическая регрессия достигла потолка ~0.49.** Все эксперименты — 7 признаков, 17, 22, Polynomial Features, Feature Engineering — дали схожий результат. Данные имеют нелинейную структуру зависимостей.
 
-2. **Самые важные признаки** — `Term` и `Credit Score`. Долгосрочные кредиты с низким кредитным рейтингом — главный индикатор риска дефолта.
+2. **Самые важные признаки** — `Term` (+0.181) и `Credit Score` (-0.170). Долгосрочные кредиты с низким кредитным рейтингом — главный индикатор риска дефолта.
 
-3. **Пропуски несут смысл.** 54% пропусков в `Months since last delinquent` — это не отсутствие данных, а отсутствие просрочек. Правильная обработка этого признака важна для качества модели.
+3. **Пропуски несут смысл.** 54% пропусков в `Months since last delinquent` означают отсутствие просрочек, а не неизвестное значение. Правильная обработка через `Has_Delinquent` важна для качества модели.
 
-4. **Дисбаланс классов (1:2.5)** требует явной балансировки — без `class_weight='balanced'` модель игнорирует класс 1.
+4. **Дисбаланс классов (1:2.5)** требует явной балансировки через `class_weight='balanced'` — без неё модель практически игнорирует класс дефолта.
 
-5. **Для достижения F1 > 0.5** на этих данных необходимы нелинейные модели: Random Forest, Gradient Boosting (XGBoost, LightGBM, CatBoost).
+5. **Подбор порога** через `predict_proba()` даёт гибкость — можно управлять балансом precision/recall. Для данной модели оптимальный порог совпал с 0.5, что говорит о хорошей калибровке модели.
+
+6. **Для достижения F1 > 0.5** на этих данных нужны нелинейные модели: XGBoost, LightGBM, CatBoost.
 
 ---
 
@@ -172,7 +180,7 @@ class LogisticRegressionCustom:
 
 - Python 3.12
 - pandas, numpy
-- scikit-learn
+- scikit-learn (LogisticRegression, GridSearchCV, StratifiedKFold, StandardScaler, SelectKBest, Pipeline, PolynomialFeatures, RandomForestClassifier)
 - matplotlib, seaborn
 - Google Colab
 
@@ -182,17 +190,19 @@ class LogisticRegressionCustom:
 
 ```bash
 # 1. Клонировать репозиторий
-git clone https://github.com/dominator666/test-repo/
+git clone https://https://github.com/dominator666/test-repo
 
-# 2. Открыть ноутбук в Google Colab
+# 2. Открыть ноутбук в Google Colab:
 # HW_regression_Ilia_Zabegaev_final.ipynb
 
-# 3. Загрузить данные
+# 3. Загрузить файлы данных через Files → Upload:
 # course_project_train.csv
 # course_project_test.csv
 
 # 4. Runtime → Restart and run all
 ```
+
+Прогнозы сохранятся в `predictions_final.csv` (2500 строк, значения 0/1).
 
 ---
 
